@@ -87,14 +87,6 @@ class InputEmbedding(nn.Module):
         # Shape: (B, T, C)
         x = token_embeddings + position_embeddings
 
-        # Temporary shape inspection
-        print("\nInside input embedding:")
-        print("Token IDs:", token_ids.shape)
-        print("Token embeddings:", token_embeddings.shape)
-        print("Position IDs:", position_ids.shape)
-        print("Position embeddings:", position_embeddings.shape)
-        print("Combined embeddings:", x.shape)
-
         return x
 
 
