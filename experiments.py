@@ -34,6 +34,17 @@ EXPERIMENTS = {
         "target_training_steps": 2000,
         "reporting_interval": 100,
         "evaluation_batches": 20
+    },
+    "medium_model": {
+        "batch_size": 16,
+        "context_length": 16,
+        "embedding_size": 64,
+        "number_of_heads": 4,
+        "number_of_blocks": 4,
+        "learning_rate": 3e-4,
+        "target_training_steps": 2000,
+        "reporting_interval": 100,
+        "evaluation_batches": 20
     }
 }
 
