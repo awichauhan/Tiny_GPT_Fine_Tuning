@@ -5,7 +5,7 @@ import torch.nn as nn
 
 from dataset import get_batch, TRAIN_TOKENS_PATH
 from tokenizer.bpe import load_tokenizer, decode
-from model.transformer_block import TransformerBlock
+from model.transformer import TransformerStack
 
 TOKENIZER_DIRECTORY = Path("artifacts/tokenizer")
 
@@ -109,6 +109,9 @@ if __name__ == "__main__":
 
     # Four heads, each with 32 / 4 = 8 features.
     number_of_heads = 4
+
+    # Number of Transformer blocks.
+    number_of_layers = 3
 
     # Load the trained BPE vocabulary.
     _, vocabulary = load_tokenizer(
@@ -243,22 +246,27 @@ if __name__ == "__main__":
     print("\nToken + position addition check passed.")
 
     # Pass actual Shakespeare embeddings through
-    # one complete Transformer block.
-    transformer_block = TransformerBlock(
+    # multiple Transformer blocks.
+    transformer = TransformerStack(
         embedding_size=embedding_size,
         number_of_heads=number_of_heads,
-        context_length=context_length
+        context_length=context_length,
+        number_of_layers=number_of_layers
     )
 
-    transformer_output = transformer_block(x)
+    transformer_output = transformer(x)
 
-    print("\nTransformer-block input shape:")
+    print("\nNumber of Transformer blocks:")
+    print(len(transformer.blocks))
+
+    print("\nTransformer-stack input shape:")
     print(x.shape)
 
-    print("\nTransformer-block output shape:")
+    print("\nTransformer-stack output shape:")
     print(transformer_output.shape)
 
+    assert len(transformer.blocks) == number_of_layers
     assert transformer_output.shape == x.shape
 
-    print("\nTransformer-block shape check passed.")
+    print("\nTransformer-stack checks passed.")
 
