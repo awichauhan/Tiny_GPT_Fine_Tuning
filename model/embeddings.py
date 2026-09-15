@@ -7,7 +7,11 @@ from dataset import get_batch, TRAIN_TOKENS_PATH
 from tokenizer.bpe import load_tokenizer, decode
 from model.transformer import TransformerStack
 
-TOKENIZER_DIRECTORY = Path("artifacts/tokenizer")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+TOKENIZER_DIRECTORY = (
+    PROJECT_ROOT / "artifacts" / "tokenizer"
+)
 
 
 class InputEmbedding(nn.Module):
