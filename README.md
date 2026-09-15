@@ -403,5 +403,3 @@ The text remains imperfect, as expected for a 239K-parameter model trained for o
 - [x] Sampling comparison
 - [x] Context-length comparison
 - [x] Model-size comparison
-
-This repository is an educational implementation intended to make every important stage of a GPT-style language model visible and understandable.
