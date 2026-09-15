@@ -2,7 +2,11 @@ from pathlib import Path
 
 import torch
 
-from dataset import get_batch, TRAIN_TOKENS_PATH
+from dataset import (
+    get_batch,
+    TRAIN_TOKENS_PATH,
+    VALIDATION_TOKENS_PATH
+)
 from model.tiny_gpt import TinyGPT
 from tokenizer.bpe import load_tokenizer
 
@@ -16,6 +20,65 @@ TOKENIZER_DIRECTORY = (
 TRAIN_TOKENS_FILE = (
     PROJECT_ROOT / TRAIN_TOKENS_PATH
 )
+
+VALIDATION_TOKENS_FILE = (
+    PROJECT_ROOT / VALIDATION_TOKENS_PATH
+)
+
+
+@torch.no_grad()
+def estimate_loss(
+    model,
+    train_tokens,
+    validation_tokens,
+    batch_size,
+    context_length,
+    evaluation_batches
+):
+    """
+    Estimate average loss on multiple training
+    and validation batches.
+    """
+
+    losses_by_split = {}
+
+    # Disable training-specific behaviour.
+    model.eval()
+
+    datasets = {
+        "train": train_tokens,
+        "validation": validation_tokens
+    }
+
+    for split_name, token_data in datasets.items():
+
+        batch_losses = torch.zeros(
+            evaluation_batches
+        )
+
+        for batch_index in range(evaluation_batches):
+
+            input_token_ids, target_token_ids = get_batch(
+                token_data=token_data,
+                batch_size=batch_size,
+                context_length=context_length
+            )
+
+            _, loss = model(
+                input_token_ids=input_token_ids,
+                target_token_ids=target_token_ids
+            )
+
+            batch_losses[batch_index] = loss.item()
+
+        losses_by_split[split_name] = (
+            batch_losses.mean().item()
+        )
+
+    # Return the model to training mode.
+    model.train()
+
+    return losses_by_split
 
 
 def main():
@@ -33,6 +96,7 @@ def main():
     learning_rate = 3e-4
     training_steps = 1000
     reporting_interval = 100
+    evaluation_batches = 20
 
     _, vocabulary = load_tokenizer(
         output_directory=TOKENIZER_DIRECTORY
@@ -42,6 +106,11 @@ def main():
 
     train_tokens = torch.load(
         TRAIN_TOKENS_FILE,
+        map_location="cpu"
+    )
+
+    validation_tokens = torch.load(
+        VALIDATION_TOKENS_FILE,
         map_location="cpu"
     )
 
@@ -70,9 +139,6 @@ def main():
 
     model.train()
 
-    running_loss = 0.0
-    steps_since_report = 0
-
     for step in range(1, training_steps + 1):
 
         input_token_ids, target_token_ids = get_batch(
@@ -92,26 +158,26 @@ def main():
 
         optimizer.step()
 
-        # Store only the Python number, not the computation graph.
-        running_loss += loss.item()
-        steps_since_report += 1
-
         if (
             step == 1
             or step % reporting_interval == 0
         ):
-            average_loss = (
-                running_loss / steps_since_report
+            estimated_losses = estimate_loss(
+                model=model,
+                train_tokens=train_tokens,
+                validation_tokens=validation_tokens,
+                batch_size=batch_size,
+                context_length=context_length,
+                evaluation_batches=evaluation_batches
             )
 
             print(
                 f"Step {step:4d} | "
-                f"Average training loss: "
-                f"{average_loss:.4f}"
+                f"Train loss: "
+                f"{estimated_losses['train']:.4f} | "
+                f"Validation loss: "
+                f"{estimated_losses['validation']:.4f}"
             )
-
-            running_loss = 0.0
-            steps_since_report = 0
 
     print("\nTraining completed.")
 
