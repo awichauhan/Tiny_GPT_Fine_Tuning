@@ -5,8 +5,7 @@ import torch.nn as nn
 
 from dataset import get_batch, TRAIN_TOKENS_PATH
 from tokenizer.bpe import load_tokenizer, decode
-from model.attention import MultiHeadAttention
-
+from model.transformer_block import TransformerBlock
 
 TOKENIZER_DIRECTORY = Path("artifacts/tokenizer")
 
@@ -243,21 +242,23 @@ if __name__ == "__main__":
 
     print("\nToken + position addition check passed.")
 
-    # Pass actual Shakespeare embeddings into attention.
-    attention = MultiHeadAttention(
+    # Pass actual Shakespeare embeddings through
+    # one complete Transformer block.
+    transformer_block = TransformerBlock(
         embedding_size=embedding_size,
         number_of_heads=number_of_heads,
         context_length=context_length
     )
 
-    attention_output = attention(x)
+    transformer_output = transformer_block(x)
 
-    print("\nAttention input shape:")
+    print("\nTransformer-block input shape:")
     print(x.shape)
 
-    print("\nAttention output shape:")
-    print(attention_output.shape)
+    print("\nTransformer-block output shape:")
+    print(transformer_output.shape)
 
-    assert attention_output.shape == x.shape
+    assert transformer_output.shape == x.shape
 
-    print("\nActual-data embedding and attention checks passed.")
+    print("\nTransformer-block shape check passed.")
+
