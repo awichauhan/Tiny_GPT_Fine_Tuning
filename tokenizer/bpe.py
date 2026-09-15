@@ -74,12 +74,19 @@ def build_vocabulary(merges):
         )
     return vocabulary
 
-def decode(token_ids, vocabulary):
+def decode(
+            token_ids,
+            vocabulary,
+            errors="strict"
+    ):
     decoded_bytes = b"".join(
         vocabulary[token_id]
         for token_id in token_ids
     )
-    decoded_text = decoded_bytes.decode("utf-8")
+    decoded_text = decoded_bytes.decode(
+        "utf-8",
+        errors=errors
+    )
     return decoded_text
 
 def encode(text, merges):

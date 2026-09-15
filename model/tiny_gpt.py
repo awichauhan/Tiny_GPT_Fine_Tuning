@@ -52,6 +52,8 @@ class TinyGPT(nn.Module):
             vocabulary_size
         )
 
+        self.context_length = context_length
+
     def forward(
             self,
             input_token_ids,
@@ -95,6 +97,55 @@ class TinyGPT(nn.Module):
 
         return logits, loss
 
+    @torch.no_grad()
+    def generate(
+        self,
+        token_ids,
+        max_new_tokens,
+        temperature=1.0
+    ):
+        if temperature <= 0:
+            raise ValueError(
+                "temperature must be greater than zero"
+            )
+
+        for _ in range(max_new_tokens):
+
+            # The model can only process context_length tokens.
+            current_context = token_ids[
+                :,
+                -self.context_length:
+            ]
+
+            # Predict vocabulary logits at every position.
+            logits, _ = self(current_context)
+
+            # Only the final position predicts the next token.
+            next_token_logits = logits[:, -1, :]
+
+            # Control randomness.
+            next_token_logits = (
+                next_token_logits / temperature
+            )
+
+            probabilities = torch.softmax(
+                next_token_logits,
+                dim=-1
+            )
+
+            # Sample one token for every sequence.
+            next_token_id = torch.multinomial(
+                probabilities,
+                num_samples=1
+            )
+
+            # Append the sampled token to the sequence.
+            token_ids = torch.cat(
+                [token_ids, next_token_id],
+                dim=1
+            )
+
+        return token_ids
 
 if __name__ == "__main__":
 
