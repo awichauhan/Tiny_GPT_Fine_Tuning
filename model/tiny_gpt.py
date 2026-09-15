@@ -99,47 +99,80 @@ class TinyGPT(nn.Module):
 
     @torch.no_grad()
     def generate(
-        self,
-        token_ids,
-        max_new_tokens,
-        temperature=1.0
+            self,
+            token_ids,
+            max_new_tokens,
+            temperature=1.0,
+            top_k=None,
+            greedy=False
     ):
-        if temperature <= 0:
+        if not greedy and temperature <= 0:
             raise ValueError(
                 "temperature must be greater than zero"
             )
 
+        if top_k is not None and top_k < 1:
+            raise ValueError(
+                "top_k must be at least one"
+            )
+
         for _ in range(max_new_tokens):
 
-            # The model can only process context_length tokens.
             current_context = token_ids[
-                :,
-                -self.context_length:
-            ]
+                              :,
+                              -self.context_length:
+                              ]
 
-            # Predict vocabulary logits at every position.
             logits, _ = self(current_context)
 
-            # Only the final position predicts the next token.
+            # Prediction for the next position.
             next_token_logits = logits[:, -1, :]
 
-            # Control randomness.
-            next_token_logits = (
-                next_token_logits / temperature
-            )
+            if greedy:
+                # Always select the highest-scoring token.
+                next_token_id = torch.argmax(
+                    next_token_logits,
+                    dim=-1,
+                    keepdim=True
+                )
 
-            probabilities = torch.softmax(
-                next_token_logits,
-                dim=-1
-            )
+            else:
+                next_token_logits = (
+                        next_token_logits / temperature
+                )
 
-            # Sample one token for every sequence.
-            next_token_id = torch.multinomial(
-                probabilities,
-                num_samples=1
-            )
+                if top_k is not None:
+                    number_to_keep = min(
+                        top_k,
+                        next_token_logits.shape[-1]
+                    )
 
-            # Append the sampled token to the sequence.
+                    top_values, _ = torch.topk(
+                        next_token_logits,
+                        k=number_to_keep,
+                        dim=-1
+                    )
+
+                    cutoff = top_values[:, -1].unsqueeze(-1)
+
+                    # Remove every token outside the top-k.
+                    next_token_logits = (
+                        next_token_logits.masked_fill(
+                            next_token_logits < cutoff,
+                            float("-inf")
+                        )
+                    )
+
+                probabilities = torch.softmax(
+                    next_token_logits,
+                    dim=-1
+                )
+
+                next_token_id = torch.multinomial(
+                    probabilities,
+                    num_samples=1
+                )
+
             token_ids = torch.cat(
                 [token_ids, next_token_id],
                 dim=1
