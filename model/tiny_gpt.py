@@ -7,6 +7,7 @@ from dataset import get_batch, TRAIN_TOKENS_PATH
 from model.embeddings import InputEmbedding
 from model.transformer import TransformerStack
 from tokenizer.bpe import load_tokenizer, decode
+import torch.nn.functional as F
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -51,8 +52,11 @@ class TinyGPT(nn.Module):
             vocabulary_size
         )
 
-    def forward(self, input_token_ids):
-
+    def forward(
+            self,
+            input_token_ids,
+            target_token_ids=None
+    ):
         # (B, T) → (B, T, C)
         x = self.input_embedding(input_token_ids)
 
@@ -65,7 +69,31 @@ class TinyGPT(nn.Module):
         # (B, T, C) → (B, T, V)
         logits = self.vocabulary_projection(x)
 
-        return logits
+        loss = None
+
+        if target_token_ids is not None:
+            batch_size, sequence_length, vocabulary_size = (
+                logits.shape
+            )
+
+            # Treat every token position as one classification example.
+            # (B, T, V) → (B*T, V)
+            flattened_logits = logits.reshape(
+                batch_size * sequence_length,
+                vocabulary_size
+            )
+
+            # (B, T) → (B*T)
+            flattened_targets = target_token_ids.reshape(
+                batch_size * sequence_length
+            )
+
+            loss = F.cross_entropy(
+                flattened_logits,
+                flattened_targets
+            )
+
+        return logits, loss
 
 
 if __name__ == "__main__":
@@ -103,7 +131,10 @@ if __name__ == "__main__":
         number_of_blocks=number_of_blocks
     )
 
-    logits = model(input_token_ids)
+    logits, loss = model(
+        input_token_ids=input_token_ids,
+        target_token_ids=target_token_ids
+    )
 
     print("\nInput shape:")
     print(input_token_ids.shape)
@@ -142,3 +173,11 @@ if __name__ == "__main__":
     )
 
     print("\nTinyGPT forward-pass checks passed.")
+
+    print("\nCross-entropy loss:")
+    print(loss.item())
+
+    assert loss.ndim == 0
+    assert torch.isfinite(loss)
+
+    print("\nLoss calculation checks passed.")
