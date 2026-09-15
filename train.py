@@ -10,6 +10,12 @@ from dataset import (
 from model.tiny_gpt import TinyGPT
 from tokenizer.bpe import load_tokenizer
 
+from checkpoint import (
+    save_checkpoint,
+    load_checkpoint
+)
+
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
@@ -23,6 +29,13 @@ TRAIN_TOKENS_FILE = (
 
 VALIDATION_TOKENS_FILE = (
     PROJECT_ROOT / VALIDATION_TOKENS_PATH
+)
+
+CHECKPOINT_PATH = (
+    PROJECT_ROOT
+    / "artifacts"
+    / "checkpoints"
+    / "tiny_gpt.pt"
 )
 
 
@@ -114,18 +127,45 @@ def main():
         map_location="cpu"
     )
 
+    model_configuration = {
+        "vocabulary_size": vocabulary_size,
+        "embedding_size": embedding_size,
+        "context_length": context_length,
+        "number_of_heads": number_of_heads,
+        "number_of_blocks": number_of_blocks
+    }
+
     model = TinyGPT(
-        vocabulary_size=vocabulary_size,
-        embedding_size=embedding_size,
-        context_length=context_length,
-        number_of_heads=number_of_heads,
-        number_of_blocks=number_of_blocks
+        **model_configuration
     )
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=learning_rate
     )
+
+    starting_step = 0
+
+    if CHECKPOINT_PATH.exists():
+
+        checkpoint = load_checkpoint(
+            checkpoint_path=CHECKPOINT_PATH,
+            model=model,
+            optimizer=optimizer
+        )
+
+        starting_step = checkpoint["step"]
+
+        print(
+            f"Resuming training from step "
+            f"{starting_step}."
+        )
+
+    else:
+        print(
+            "No checkpoint found. "
+            "Starting fresh training."
+        )
 
     number_of_parameters = sum(
         parameter.numel()
@@ -139,7 +179,12 @@ def main():
 
     model.train()
 
-    for step in range(1, training_steps + 1):
+    ending_step = starting_step + training_steps
+
+    for step in range(
+            starting_step + 1,
+            ending_step + 1
+    ):
 
         input_token_ids, target_token_ids = get_batch(
             token_data=train_tokens,
@@ -177,6 +222,25 @@ def main():
                 f"{estimated_losses['train']:.4f} | "
                 f"Validation loss: "
                 f"{estimated_losses['validation']:.4f}"
+            )
+
+            configuration = {
+                "model": model_configuration,
+                "batch_size": batch_size,
+                "learning_rate": learning_rate
+            }
+
+            save_checkpoint(
+                checkpoint_path=CHECKPOINT_PATH,
+                model=model,
+                optimizer=optimizer,
+                step=step,
+                configuration=configuration,
+                metrics=estimated_losses
+            )
+
+            print(
+                f"Checkpoint saved at step {step}."
             )
 
     print("\nTraining completed.")
