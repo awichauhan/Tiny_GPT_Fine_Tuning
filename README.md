@@ -1,405 +1,1028 @@
-# Tiny GPT From Scratch
+# Tiny GPT — Cybersecurity Domain Fine-Tuning
 
-A compact decoder-only Transformer language model implemented from first principles with Python and PyTorch. The project covers the complete pipeline from raw text and byte-pair encoding (BPE) to causal self-attention, training, resumable checkpoints, autoregressive generation, and controlled experiments.
+An educational implementation of **domain-adaptive fine-tuning** on a small decoder-only Transformer built from scratch with Python and PyTorch.
 
-The model is trained on the Tiny Shakespeare corpus and intentionally kept small so that every stage can be inspected and understood.
+This project starts from a previously trained **Tiny GPT** language model and adapts it from its original Shakespeare distribution to a cybersecurity domain using data derived from:
 
-## Highlights
+- MITRE ATT&CK Enterprise
+- NIST Cybersecurity Glossary
 
-- Byte-level BPE tokenizer implemented without an external tokenizer library
-- Token and learned positional embeddings
-- Causal scaled dot-product self-attention
-- Multi-head attention with output projection
-- Pre-normalized Transformer blocks with residual connections
-- GELU feed-forward networks
-- Next-token cross-entropy training with AdamW
-- Training and validation loss estimation
-- Resumable model and optimizer checkpoints
-- Greedy, temperature, and top-k generation
-- Context-length and model-size experiments
-- Loss, perplexity, throughput, and generation-quality analysis
+The purpose of the project is not to build a production-quality security LLM. The model contains only **57,900 parameters** and has a **16-token context window**.
 
-## Architecture
+Instead, the project is designed to study the mechanics of:
 
-```mermaid
-flowchart TD
-    A["BPE token IDs (B,T)"] --> B["Token + position embeddings (B,T,C)"]
-    B --> C["Pre-norm Transformer blocks"]
-    C --> D["Final LayerNorm"]
-    D --> E["Vocabulary projection (B,T,V)"]
-    E --> F["Loss during training or sampling during generation"]
-```
+- continued pretraining / domain adaptation
+- tokenizer reuse during fine-tuning
+- domain shift
+- validation methodology
+- catastrophic forgetting
+- controlled model comparison
+- decoding strategies
+- limitations caused by model capacity, tokenization, and context length
 
-Each Transformer block contains:
+---
+
+## Relationship to Tiny GPT From Scratch
+
+This repository builds on:
+
+**Tiny GPT From Scratch**
+
+The original project implemented the complete language-model pipeline:
 
 ```text
-x = x + MultiHeadAttention(LayerNorm(x))
-x = x + FeedForward(LayerNorm(x))
+Raw text
+   ↓
+Byte-level BPE tokenizer
+   ↓
+Token IDs
+   ↓
+Context windows
+   ↓
+Decoder-only Transformer
+   ↓
+Cross-entropy loss
+   ↓
+Backpropagation
+   ↓
+AdamW optimization
+   ↓
+Autoregressive generation
 ```
 
-The causal mask prevents a token from attending to future positions, making the model suitable for next-token generation.
+The original model was trained on **Tiny Shakespeare**.
 
-## End-to-end pipeline
+This project asks the next question:
+
+> Can an already-trained language model be adapted to a completely different domain without training it from scratch again?
+
+The target domain chosen for the experiment is **cybersecurity**.
+
+---
+
+# Experiment Overview
+
+The complete experiment is:
 
 ```text
-Raw Shakespeare text
-        ↓
-Train/validation split
-        ↓
-Train byte-level BPE tokenizer
-        ↓
-Encode text into token-ID tensors
-        ↓
-Create input and shifted-target windows
-        ↓
-TinyGPT forward pass
-        ↓
-Cross-entropy loss and AdamW updates
-        ↓
-Checkpointed trained model
-        ↓
-Autoregressive text generation
+Shakespeare-trained Tiny GPT
+            ↓
+Evaluate on cybersecurity text
+            ↓
+Prepare MITRE + NIST security corpus
+            ↓
+Reuse original BPE tokenizer
+            ↓
+Tokenize security corpus
+            ↓
+Measure tokenizer/domain mismatch
+            ↓
+Fine-tune all pretrained parameters
+            ↓
+Save security-adapted checkpoint
+            ↓
+Evaluate on security validation data
+            ↓
+Evaluate again on Shakespeare data
+            ↓
+Measure catastrophic forgetting
+            ↓
+Compare generation before vs after
 ```
 
-## Project structure
+---
 
-```text
-Tiny_GPT_From_Scratch/
-├── artifacts/
-│   ├── checkpoints/           # Saved model and optimizer states
-│   └── tokenizer/             # BPE vocabulary and merge rules
-├── data/
-│   ├── raw/                   # Original Tiny Shakespeare text
-│   └── processed/             # Splits and encoded token tensors
-├── model/
-│   ├── attention.py           # Causal and multi-head attention
-│   ├── embeddings.py          # Token and positional embeddings
-│   ├── feed_forward.py        # GELU feed-forward network
-│   ├── transformer_block.py   # Pre-norm block and residual paths
-│   ├── transformer.py         # Sequential Transformer stack
-│   └── tiny_gpt.py            # Complete model, loss, and generation
-├── tokenizer/
-│   └── bpe.py                 # BPE training, encoding, and decoding
-├── checkpoint.py              # Save and restore training state
-├── compare_contexts.py        # Context-length comparison
-├── compare_models.py          # Model-size comparison
-├── dataset.py                 # Context windows and random batches
-├── experiments.py             # Named experiment configurations
-├── generate.py                # Sampling experiments
-├── prepare_data.py            # Train/validation text split
-├── prepare_tokens.py          # Encode and save corpus tensors
-├── train.py                   # Training, evaluation, and checkpoints
-└── train_tokenizer.py         # Train and verify the BPE tokenizer
-```
+# Base Model
 
-## Core components
-
-### Byte-level BPE tokenizer
-
-The tokenizer begins with the 256 possible byte values and learns frequently occurring adjacent pairs. With a configured vocabulary size of 300, it learns 44 merged tokens in addition to the base byte vocabulary.
-
-Important functions in `tokenizer/bpe.py`:
-
-- `get_pair_counts()` counts adjacent token pairs.
-- `merge_pair()` replaces occurrences of a selected pair.
-- `train_bpe()` repeatedly merges the most frequent pair.
-- `build_vocabulary()` maps token IDs back to byte sequences.
-- `encode()` converts text into token IDs.
-- `decode()` converts token IDs back into text.
-- `save_tokenizer()` and `load_tokenizer()` persist tokenizer artifacts.
-
-### Training examples
-
-The corpus is stored as a one-dimensional tensor of token IDs. `dataset.get_batch()` samples random windows and creates shifted targets:
-
-```text
-Input:  [t0, t1, t2, t3]
-Target: [t1, t2, t3, t4]
-```
-
-Every sequence position therefore acts as a next-token classification example.
-
-### Decoder-only Transformer
-
-The baseline model uses:
+The pretrained Tiny GPT used for this experiment has:
 
 | Setting | Value |
 |---|---:|
 | Vocabulary size | 300 |
-| Context length | 16 |
 | Embedding size | 32 |
+| Context length | 16 |
 | Attention heads | 4 |
-| Features per head | 8 |
 | Transformer blocks | 3 |
 | Parameters | 57,900 |
 
-Tensor shapes through the model:
+Architecture:
 
 ```text
-Token IDs:                 (B,T)
-Token + position vectors:  (B,T,C)
-Transformer output:        (B,T,C)
-Vocabulary logits:         (B,T,V)
-Targets:                   (B,T)
-Cross-entropy loss:        scalar
+Token IDs
+   ↓
+Token Embeddings
+   +
+Position Embeddings
+   ↓
+Transformer Block × 3
+   ↓
+Final LayerNorm
+   ↓
+Vocabulary Projection
+   ↓
+300 vocabulary logits
+   ↓
+Next-token prediction
 ```
 
-## Setup
+The model was already trained on Tiny Shakespeare before beginning this project.
 
-Clone the repository:
+Fine-tuning therefore starts from **learned parameters**, not random initialization.
 
-```bash
-git clone https://github.com/awichauhan/Tiny_GPT_From_Scratch.git
-cd Tiny_GPT_From_Scratch
-```
+---
 
-Create and activate a virtual environment:
+# Cybersecurity Dataset
 
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
+Two public cybersecurity sources were used.
 
-Install the dependencies:
+## MITRE ATT&CK Enterprise
 
-```bash
-python -m pip install --upgrade pip
-pip install torch numpy
-```
+The MITRE ATT&CK Enterprise STIX dataset contains multiple cybersecurity object types.
 
-The project was developed with Python 3.11.
-
-## Prepare the data and tokenizer
-
-Place the Tiny Shakespeare corpus at:
+The following object categories were selected:
 
 ```text
-data/raw/tiny_shakespeare.txt
+attack-pattern
+malware
+tool
+intrusion-set
+campaign
+course-of-action
 ```
 
-Create the training and validation text splits:
+Objects marked as revoked or deprecated were excluded.
 
-```bash
-python prepare_data.py
-```
-
-Train and verify the BPE tokenizer:
-
-```bash
-python train_tokenizer.py
-```
-
-Encode both corpus splits and save them as PyTorch tensors:
-
-```bash
-python prepare_tokens.py
-```
-
-Generated artifacts include:
+Extracted MITRE records:
 
 ```text
-artifacts/tokenizer/merges.json
-artifacts/tokenizer/vocabulary.json
-data/processed/train_tokens.pt
-data/processed/validation_tokens.pt
+1,798
 ```
 
-## Train the model
+---
 
-Available experiments are defined in `experiments.py`.
+## NIST Cybersecurity Glossary
 
-```bash
-python train.py --experiment context_8
-python train.py --experiment context_16
-python train.py --experiment context_32
-python train.py --experiment medium_model
-```
+The NIST glossary provides cybersecurity terminology and definitions.
 
-Training performs:
-
-1. Random batch sampling
-2. Forward propagation
-3. Next-token cross-entropy calculation
-4. Backpropagation
-5. AdamW parameter updates
-6. Periodic train/validation evaluation
-7. Throughput reporting
-8. Checkpoint saving
-
-Each experiment writes to a separate checkpoint:
+Example structure:
 
 ```text
-artifacts/checkpoints/context_8.pt
-artifacts/checkpoints/context_16.pt
-artifacts/checkpoints/context_32.pt
-artifacts/checkpoints/medium_model.pt
+Term
+   ↓
+Definition
+   ↓
+Source
 ```
 
-If a checkpoint exists, training restores:
-
-- Model parameters
-- Optimizer state
-- Training step
-- Model configuration
-- Latest metrics
-- PyTorch random-number-generator state
-
-A completed experiment is not silently trained beyond its configured target step.
-
-## Generate text
-
-Run the sampling comparison:
-
-```bash
-python generate.py
-```
-
-Generation supports:
-
-- Greedy/argmax decoding
-- Temperature-controlled sampling
-- Top-k filtering
-- Fixed random seeds for reproducible comparisons
-
-At every generation step, the model:
-
-1. Keeps the latest context window.
-2. Calculates vocabulary logits.
-3. Uses only the final position’s logits.
-4. Selects or samples one token.
-5. Appends that token to the sequence.
-6. Repeats until the requested length is reached.
-
-The tokenizer uses safe replacement decoding for generated byte sequences. This prevents incomplete UTF-8 byte predictions from crashing generation.
-
-## Run the comparisons
-
-Compare context lengths under identical sampling settings:
-
-```bash
-python compare_contexts.py
-```
-
-Compare the small and medium models:
-
-```bash
-python compare_models.py
-```
-
-## Results
-
-All context experiments used:
-
-- 2,000 training steps
-- 256 next-token targets per step
-- The same embedding size
-- The same number of attention heads
-- The same number of Transformer blocks
-- The same vocabulary and learning rate
-
-Throughput values were measured locally on CPU and are environment-specific.
-
-### Context-length comparison
-
-| Context | Batch | Parameters | Validation loss | Perplexity | Tokens/s |
-|---:|---:|---:|---:|---:|---:|
-| 8 | 32 | 57,644 | **3.2092** | **24.76** | 39,398 |
-| 16 | 16 | 57,900 | 3.2765 | 26.48 | 43,717 |
-| 32 | 8 | 58,412 | 3.2922 | 26.90 | **46,183** |
-
-Observations:
-
-- Context 8 achieved the lowest validation loss under the limited training budget.
-- Context 32 produced the strongest dialogue and punctuation structure in the inspected sample.
-- A longer context provides more potential information, but a small model may require more capacity or training to use it effectively.
-- Higher measured throughput for the longer contexts reflects hardware efficiency at this small scale. It does not remove attention’s quadratic scaling with context length.
-
-### Model-size comparison
-
-| Metric | Small model | Medium model |
-|---|---:|---:|
-| Context length | 16 | 16 |
-| Embedding size | 32 | 64 |
-| Transformer blocks | 3 | 4 |
-| Parameters | 57,900 | 239,020 |
-| Validation loss | 3.2765 | **2.9750** |
-| Perplexity | 26.48 | **19.59** |
-| Training throughput | **43,717 tokens/s** | 27,836 tokens/s |
-
-The medium model:
-
-- Used 4.13 times as many parameters
-- Reduced validation loss by `0.3015`
-- Reduced perplexity by approximately 26%
-- Processed approximately 36% fewer tokens per second
-- Produced more structured generated text
-
-The experiment changes both width and depth, so it measures overall model capacity rather than isolating the effect of either one.
-
-### Sampling comparison
-
-| Strategy | Observed behavior |
-|---|---|
-| Greedy | Deterministic but entered a repetitive `I I I...` loop |
-| Temperature 0.5 | More conservative and repetitive |
-| Temperature 0.8 | Better diversity/coherence balance |
-| Temperature 1.2 | Noisier output and occasional invalid bytes |
-| Temperature 0.8 + top-k 20 | Best overall balance for these checkpoints |
-
-### Example medium-model generation
-
-Prompt:
+Extracted NIST definitions:
 
 ```text
-ROMEO:
+7,747
 ```
 
-Generated excerpt:
+---
+
+# Data Preparation
+
+The extracted records were:
 
 ```text
-ROMEO: bre:
-Sids many, bly subo's your grawh abe
-As that with ry mive;
-As atte nose.
-
-QUCENTETHES:
-Ioth gee that at they mentrend you hounce.
-
-DUCOMIO:
-Now, I have a could you eew a ploager.
+MITRE records
+      +
+NIST definitions
+      ↓
+Text extraction
+      ↓
+Cleaning
+      ↓
+Markdown/citation removal
+      ↓
+Whitespace normalization
+      ↓
+Deduplication
+      ↓
+Deterministic shuffle
+      ↓
+90/10 train-validation split
 ```
 
-The text remains imperfect, as expected for a 239K-parameter model trained for only 2,000 steps. However, it demonstrates learned speaker formatting, punctuation, line structure, and Shakespeare-like token patterns.
+Final corpus:
 
-## What this project demonstrates
+| Dataset statistic | Value |
+|---|---:|
+| MITRE records | 1,798 |
+| NIST records | 7,747 |
+| Unique combined records | 9,441 |
+| Training records | 8,496 |
+| Validation records | 945 |
 
-- How raw text becomes byte-level BPE token IDs
-- Why input and shifted-target sequences create next-token supervision
-- How query, key, and value projections produce contextual representations
-- Why causal masking is required for decoder-only generation
-- How residual connections and LayerNorm stabilize Transformer blocks
-- How vocabulary projection converts contextual features into token logits
-- How autograd, cross-entropy, and AdamW train the network
-- Why validation loss is required alongside training loss
-- How complete training state can be saved and resumed
-- How decoding strategy changes repetition, diversity, and text quality
-- How context length and model capacity affect loss and throughput
+The deterministic shuffle uses a fixed random seed so that the split can be reproduced.
 
-## Project status
+---
 
-- [x] Data preparation and train/validation split
-- [x] Byte-level BPE tokenizer
-- [x] Token tensors and shifted training windows
-- [x] Causal single-head attention
-- [x] Multi-head attention
-- [x] Token and positional embeddings
-- [x] Feed-forward network
-- [x] LayerNorm and residual connections
-- [x] Transformer stack and vocabulary projection
-- [x] Cross-entropy training with AdamW
-- [x] Validation tracking
-- [x] Resumable checkpoints
-- [x] Autoregressive generation
-- [x] Sampling comparison
-- [x] Context-length comparison
-- [x] Model-size comparison
+# Why the Original Tokenizer Was Reused
+
+The original Tiny GPT tokenizer was trained on Shakespeare and contains:
+
+```text
+300 tokens
+```
+
+It might seem natural to train a new tokenizer for cybersecurity.
+
+That was deliberately **not done**.
+
+The pretrained model has already learned embeddings associated with the existing token IDs:
+
+```text
+token ID 263
+      ↓
+embedding[263]
+```
+
+Changing the tokenizer could assign a completely different meaning to token ID `263`, while the model would still contain the embedding learned for the old token.
+
+Therefore the experiment preserves:
+
+```text
+same tokenizer
+same vocabulary
+same token IDs
+same model architecture
+```
+
+and changes only the model parameters through fine-tuning.
+
+---
+
+# Tokenizer Domain-Shift Analysis
+
+The existing BPE tokenizer can represent cybersecurity terms because it begins from UTF-8 bytes, but domain-specific words are often split inefficiently.
+
+Examples:
+
+| Word | Bytes | Tokens | Bytes / Token |
+|---|---:|---:|---:|
+| firewall | 8 | 7 | 1.14 |
+| malware | 7 | 6 | 1.17 |
+| authentication | 14 | 11 | 1.27 |
+| credential | 10 | 9 | 1.11 |
+| cryptography | 12 | 12 | 1.00 |
+| vulnerability | 13 | 12 | 1.08 |
+
+Example:
+
+```text
+authentication
+
+a | u | th | en | t | i | c | a | t | i | on
+```
+
+The tokenizer therefore remains compatible with the pretrained model but is not optimized for the cybersecurity domain.
+
+This becomes important later because the model has only a **16-token context window**.
+
+---
+
+# Security Tokenization
+
+The cleaned corpus was encoded with the original BPE tokenizer.
+
+Generated token tensors:
+
+```text
+data/processed/security_train_tokens.pt
+data/processed/security_validation_tokens.pt
+```
+
+Token counts:
+
+| Split | Tokens |
+|---|---:|
+| Security training | 1,990,177 |
+| Security validation | 233,575 |
+
+---
+
+# Baseline Evaluation
+
+Before fine-tuning, the pretrained model was evaluated on both:
+
+```text
+Shakespeare validation data
+Security validation data
+```
+
+No parameters were changed during this stage.
+
+The evaluation used:
+
+```python
+model.eval()
+torch.no_grad()
+```
+
+and did not call:
+
+```python
+loss.backward()
+optimizer.step()
+```
+
+This established the model's performance before cybersecurity adaptation.
+
+---
+
+# Full-Parameter Fine-Tuning
+
+The pretrained model weights were loaded from the original checkpoint.
+
+A **new optimizer** was created instead of restoring the old Shakespeare-training optimizer state.
+
+Fine-tuning configuration:
+
+| Setting | Value |
+|---|---:|
+| Training steps | 500 |
+| Batch size | 16 |
+| Learning rate | `1e-4` |
+| Context length | 16 |
+| Optimizer | AdamW |
+| Trainable parameters | 57,900 |
+| Fine-tuning type | Full parameter |
+
+Training loop:
+
+```text
+security_train_tokens
+        ↓
+random context windows
+        ↓
+Tiny GPT
+        ↓
+next-token logits
+        ↓
+cross-entropy loss
+        ↓
+loss.backward()
+        ↓
+gradients
+        ↓
+optimizer.step()
+        ↓
+updated model parameters
+```
+
+All model parameters were allowed to change.
+
+This is a form of **domain-adaptive continued pretraining** because the training objective remains next-token prediction.
+
+---
+
+# Fine-Tuning Progress
+
+During training, both security and Shakespeare validation loss were monitored.
+
+| Step | Train Loss | Security Val Loss | Shakespeare Val Loss |
+|---:|---:|---:|---:|
+| Before FT | — | 3.7613 | 3.2625 |
+| 1 | 3.6760 | 3.7756 | 3.2677 |
+| 100 | 3.7317 | 3.4844 | 3.3773 |
+| 200 | 3.6915 | 3.4848 | 3.4366 |
+| 300 | 3.3334 | 3.3665 | 3.4825 |
+| 400 | 3.4568 | 3.3549 | 3.5083 |
+| 500 | 3.3312 | 3.2852 | 3.5563 |
+
+The trend already suggests two simultaneous effects:
+
+```text
+Security loss ↓
+Shakespeare loss ↑
+```
+
+---
+
+# Controlled Base vs Fine-Tuned Evaluation
+
+A separate controlled evaluation was then performed.
+
+Both models received:
+
+- identical validation datasets
+- identical batch size
+- identical context length
+- identical random seed
+- identical sampled validation windows
+- 100 evaluation batches
+
+Configuration:
+
+```text
+Evaluation batches: 100
+Batch size:         32
+Context length:     16
+Random seed:        42
+```
+
+Results:
+
+| Metric | Base Model | Security Fine-Tuned | Change |
+|---|---:|---:|---:|
+| Security validation loss | 3.7467 | **3.3058** | **-11.77%** |
+| Shakespeare validation loss | **3.2650** | 3.5439 | **+8.54%** |
+
+---
+
+# Main Experimental Result
+
+The security validation loss decreased:
+
+```text
+3.7467
+   ↓
+3.3058
+```
+
+Relative reduction:
+
+```text
+11.77%
+```
+
+At the same time, Shakespeare validation loss increased:
+
+```text
+3.2650
+   ↓
+3.5439
+```
+
+Relative degradation:
+
+```text
+8.54%
+```
+
+The experiment therefore demonstrates both:
+
+```text
+DOMAIN ADAPTATION
+       +
+CATASTROPHIC FORGETTING
+```
+
+The model became better at predicting cybersecurity text while becoming worse at its original Shakespeare distribution.
+
+---
+
+# Generation Experiments
+
+After quantitative evaluation, the base and fine-tuned models were compared qualitatively using identical prompts.
+
+Generation strategies tested:
+
+```text
+Greedy decoding
+Temperature sampling
+Top-k sampling
+Top-p / nucleus sampling
+```
+
+Top-p sampling was added to the original Tiny GPT generation implementation.
+
+---
+
+## Greedy Decoding
+
+Always selects:
+
+```text
+argmax(next-token logits)
+```
+
+It is deterministic but caused strong repetition in this very small model.
+
+Example behavior:
+
+```text
+...tititititititition...
+```
+
+---
+
+## Temperature Sampling
+
+Logits are scaled using:
+
+```text
+logits / temperature
+```
+
+Lower temperature sharpens the distribution.
+
+Higher temperature increases diversity.
+
+---
+
+## Top-k Sampling
+
+Only the `k` highest-scoring candidate tokens remain available for sampling.
+
+Example:
+
+```text
+top_k = 20
+```
+
+means that only the 20 strongest candidate tokens can be sampled.
+
+---
+
+## Top-p / Nucleus Sampling
+
+Instead of selecting a fixed number of candidate tokens, top-p keeps the smallest set of tokens whose cumulative probability reaches a chosen threshold.
+
+Example:
+
+```text
+top_p = 0.9
+```
+
+Conceptually:
+
+```text
+sort probabilities
+       ↓
+cumulative sum
+       ↓
+keep tokens until probability mass ≈ 0.9
+       ↓
+sample
+```
+
+This creates an adaptive candidate set.
+
+---
+
+# Generation Result
+
+Changing the decoding algorithm did **not** solve the generation-quality problem.
+
+The base model produced mostly Shakespeare-like fragments.
+
+The security-fine-tuned model produced different patterns and more technical-looking fragments, but still failed to generate coherent cybersecurity explanations.
+
+This showed an important distinction:
+
+```text
+Fine-tuning changed the probability distribution
+                    ≠
+Fine-tuning created a capable language model
+```
+
+Sampling strategies can change how tokens are selected from the model's probability distribution.
+
+They cannot compensate for a weak underlying probability distribution.
+
+---
+
+# Training-Format Sanity Test
+
+A final generation experiment used prompts that more closely matched the fine-tuning corpus:
+
+```text
+Term: firewall
+Definition:
+
+Term: malware
+Definition:
+
+Term: authentication
+Definition:
+
+Name: Malware
+Description:
+```
+
+This experiment revealed another major limitation.
+
+Prompt token counts were:
+
+| Prompt | Token count |
+|---|---:|
+| `Term: firewall\nDefinition:` | 22 |
+| `Term: malware\nDefinition:` | 20 |
+| `Term: authentication\nDefinition:` | 25 |
+| `Name: Malware\nDescription:` | 23 |
+
+But the model context length is:
+
+```text
+16
+```
+
+Generation uses a sliding context:
+
+```python
+current_context = token_ids[:, -self.context_length:]
+```
+
+Therefore the model was already discarding part of every structured prompt before generating its first new token.
+
+For example:
+
+```text
+25-token prompt
+       ↓
+context length = 16
+       ↓
+first 9 tokens removed
+```
+
+The combination of:
+
+```text
+small vocabulary
+        +
+inefficient security tokenization
+        +
+16-token context
+```
+
+severely limits useful conditioning.
+
+---
+
+# Why Generation Remained Poor
+
+The final experiments identified three primary bottlenecks.
+
+## 1. Model Capacity
+
+The model contains only:
+
+```text
+57,900 parameters
+```
+
+It was intentionally designed for learning Transformer mechanics rather than producing production-quality language.
+
+Fine-tuning cannot turn a weak base language model into a strong foundation model.
+
+---
+
+## 2. Context Length
+
+The model sees only:
+
+```text
+16 tokens
+```
+
+This is too small for realistic cybersecurity prompts, especially when technical words are fragmented into many BPE tokens.
+
+---
+
+## 3. Tokenizer Domain Mismatch
+
+The tokenizer was trained on Shakespeare.
+
+It can represent cybersecurity text, but often requires many small token pieces.
+
+That increases sequence length and consumes the already-small context window rapidly.
+
+---
+
+# Final Conclusion
+
+The experiment successfully demonstrates that **domain-adaptive fine-tuning works even on a model built from scratch**.
+
+Quantitatively:
+
+```text
+Security validation loss:
+3.7467 → 3.3058
+11.77% relative improvement
+```
+
+while:
+
+```text
+Shakespeare validation loss:
+3.2650 → 3.5439
+8.54% relative degradation
+```
+
+This provides direct experimental evidence of:
+
+```text
+domain adaptation
+        +
+catastrophic forgetting
+```
+
+However, qualitative generation remained poor because of fundamental limitations in:
+
+```text
+model capacity
+context length
+tokenizer efficiency
+original language-model quality
+```
+
+The experiment therefore also demonstrates an important lesson:
+
+> Fine-tuning can move a model's learned probability distribution toward a new domain, but it cannot create capabilities that the underlying model does not have sufficient capacity to represent.
+
+---
+
+# Project Structure
+
+Important files introduced or used by the fine-tuning experiment:
+
+```text
+Tiny_GPT_Fine_Tuning/
+│
+├── artifacts/
+│   ├── checkpoints/
+│   │   ├── tiny_gpt.pt
+│   │   └── security_finetuned.pt
+│   └── tokenizer/
+│
+├── data/
+│   ├── raw/
+│   │   ├── tiny_shakespeare.txt
+│   │   ├── mitre_attack/
+│   │   └── nist/
+│   │
+│   └── processed/
+│       ├── train_tokens.pt
+│       ├── validation_tokens.pt
+│       ├── security_corpus.txt
+│       ├── security_train.txt
+│       ├── security_validation.txt
+│       ├── security_train_tokens.pt
+│       └── security_validation_tokens.pt
+│
+├── model/
+│   ├── attention.py
+│   ├── embeddings.py
+│   ├── feed_forward.py
+│   ├── transformer_block.py
+│   ├── transformer.py
+│   └── tiny_gpt.py
+│
+├── tokenizer/
+│   └── bpe.py
+│
+├── inspect_security_data.py
+├── prepare_finetune_data.py
+├── prepare_finetune_tokens.py
+├── inspect_security_tokenization.py
+├── evaluate_base_model.py
+├── finetune.py
+├── compare_finetuned_model.py
+├── compare_generations.py
+├── checkpoint.py
+└── dataset.py
+```
+
+---
+
+# Running the Fine-Tuning Experiment
+
+The original Tiny GPT checkpoint and tokenizer must already exist.
+
+## 1. Inspect the raw security datasets
+
+```bash
+python inspect_security_data.py
+```
+
+---
+
+## 2. Prepare the security corpus
+
+```bash
+python prepare_finetune_data.py
+```
+
+This performs:
+
+```text
+schema extraction
+cleaning
+deduplication
+shuffle
+train-validation split
+```
+
+---
+
+## 3. Tokenize the security corpus
+
+```bash
+python prepare_finetune_tokens.py
+```
+
+---
+
+## 4. Inspect tokenizer behavior
+
+```bash
+python inspect_security_tokenization.py
+```
+
+---
+
+## 5. Evaluate the original pretrained model
+
+```bash
+python evaluate_base_model.py
+```
+
+---
+
+## 6. Fine-tune on cybersecurity data
+
+```bash
+python finetune.py
+```
+
+The resulting checkpoint is saved as:
+
+```text
+artifacts/checkpoints/security_finetuned.pt
+```
+
+---
+
+## 7. Run the controlled evaluation
+
+```bash
+python compare_finetuned_model.py
+```
+
+This compares:
+
+```text
+base model
+vs
+security fine-tuned model
+```
+
+on both security and Shakespeare validation data.
+
+---
+
+## 8. Compare generation
+
+```bash
+python compare_generations.py
+```
+
+Generation experiments include:
+
+```text
+Greedy
+Temperature
+Top-k
+Top-p
+```
+
+---
+
+# Concepts Practiced
+
+## Machine Learning / LLM Concepts
+
+- Transfer learning
+- Continued pretraining
+- Domain adaptation
+- Fine-tuning
+- Next-token prediction
+- Cross-entropy loss
+- Train/validation separation
+- Controlled evaluation
+- Domain shift
+- Catastrophic forgetting
+- Autoregressive generation
+- Temperature sampling
+- Top-k sampling
+- Top-p / nucleus sampling
+- Context-window limitations
+- Tokenizer/model compatibility
+
+---
+
+## Python / PyTorch Concepts
+
+- Dictionaries and lists
+- JSON parsing
+- File I/O
+- Regular expressions
+- Functions and reusable modules
+- Deterministic random seeds
+- Tensor slicing
+- Tensor reshaping
+- `torch.no_grad()`
+- `model.eval()`
+- `loss.backward()`
+- `optimizer.step()`
+- `torch.sort()`
+- `torch.cumsum()`
+- Boolean masking
+- `torch.multinomial()`
+- `torch.gather()`
+- Checkpoint serialization
+
+---
+
+## DSA Concepts
+
+- Hash maps / dictionaries
+- Sets and hash-based deduplication
+- Arrays / lists
+- Sequential traversal — `O(N)`
+- Random indexing
+- Sliding windows
+- Sorting — approximately `O(V log V)`
+- Prefix / cumulative sums — `O(V)`
+- Threshold filtering
+- Sequence concatenation
+- Fixed-size context windows
+
+---
+
+# What Comes Next
+
+This project intentionally stops after demonstrating domain adaptation on Tiny GPT.
+
+The next stage moves the same experiment to a **real pretrained language model**.
+
+The progression becomes:
+
+```text
+Tiny GPT From Scratch
+        ↓
+understand Transformer mechanics
+
+Tiny GPT Security Fine-Tuning
+        ↓
+understand domain adaptation
+and catastrophic forgetting
+
+Real Pretrained Model Fine-Tuning
+        ↓
+apply the same concepts
+at realistic model scale
+```
+
+The real-model project will investigate:
+
+```text
+baseline generation
+tokenizer efficiency
+security-domain continued pretraining
+before/after evaluation
+instruction tuning
+response-only loss
+LoRA / PEFT
+full fine-tuning vs parameter-efficient fine-tuning
+```
+
+---
+
+# Project Status
+
+- [x] Start from pretrained Tiny GPT checkpoint
+- [x] Acquire MITRE ATT&CK data
+- [x] Acquire NIST glossary data
+- [x] Inspect JSON schemas
+- [x] Extract cybersecurity text
+- [x] Clean corpus
+- [x] Deduplicate corpus
+- [x] Create train/validation split
+- [x] Reuse pretrained tokenizer
+- [x] Tokenize security corpus
+- [x] Analyze tokenizer domain mismatch
+- [x] Establish base-model security baseline
+- [x] Full-parameter cybersecurity fine-tuning
+- [x] Save fine-tuned checkpoint
+- [x] Controlled base-vs-fine-tuned evaluation
+- [x] Measure catastrophic forgetting
+- [x] Compare generation
+- [x] Implement Top-p sampling
+- [x] Test training-format prompts
+- [x] Identify context-window bottleneck
+- [x] Complete Tiny GPT domain-adaptation experiment
+
+---
+
+## Educational Scope
+
+This repository is intentionally experimental.
+
+The generated text should **not** be interpreted as reliable cybersecurity guidance.
+
+The project exists to study how pretrained language models behave when adapted to a new domain and to expose the mechanics behind modern LLM fine-tuning workflows.
