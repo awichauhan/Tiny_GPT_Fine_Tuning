@@ -50,7 +50,7 @@ def inspect_mitre():
 
     # Find an attack-pattern object because these are
     # ATT&CK techniques and contain useful security text.
-    attack_pattern = next(
+    attack_pattern = next(              # linear search
         obj
         for obj in objects
         if obj.get("type") == "attack-pattern"
