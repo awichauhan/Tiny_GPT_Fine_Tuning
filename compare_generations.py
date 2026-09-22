@@ -34,10 +34,10 @@ FINETUNED_CHECKPOINT_PATH = (
 
 
 PROMPTS = [
-    "Firewall is",
-    "Malware is",
-    "A vulnerability",
-    "Authentication",
+    "Term: firewall\nDefinition:",
+    "Term: malware\nDefinition:",
+    "Term: authentication\nDefinition:",
+    "Name: Malware\nDescription:",
 ]
 
 
@@ -125,37 +125,34 @@ def generate_text(
     max_new_tokens
 ):
 
-    # Convert prompt into token IDs using the SAME
-    # tokenizer used during original pretraining.
+    # Encode the text prompt into token IDs.
     prompt_token_ids = encode(
         text=prompt,
         merges=merges
     )
 
+    # Show how much of our 16-token context
+    # the prompt already consumes.
+    print(
+        f"Prompt token count: {len(prompt_token_ids)}"
+    )
+
     input_token_ids = torch.tensor(
-        [
-            prompt_token_ids
-        ],
+        [prompt_token_ids],
         dtype=torch.long
     )
 
-    generated_token_ids = (
-        model.generate(
-            token_ids=input_token_ids,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-            greedy=greedy
-        )
+    generated_token_ids = model.generate(
+        token_ids=input_token_ids,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+        top_k=top_k,
+        top_p=top_p,
+        greedy=greedy
     )
 
     generated_text = decode(
-        token_ids=(
-            generated_token_ids[
-                0
-            ].tolist()
-        ),
+        token_ids=generated_token_ids[0].tolist(),
         vocabulary=vocabulary,
         errors="replace"
     )
